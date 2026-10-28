@@ -12,7 +12,8 @@ from urllib.request import Request, urlopen
 USER_AGENT = "openOMSI-Discord-Release-Announcer/2.0"
 DISCORD_API = "https://discord.com/api/v10"
 CHANGELOG_LIMIT = 2200
-THREAD_MODES = ("text", "forum")
+THREAD_MODES = ("webhook", "text", "forum")
+DEFAULT_REPORT_CHANNEL_ID = "1554233571764346940"
 
 
 def clean_mentions(value: str) -> str:
@@ -92,7 +93,8 @@ def report_template(tag: str, release_url: str, test: bool = False) -> dict:
     }
 
 
-def make_payload(release: dict, source_repo: str, test: bool = False, forum: bool = False) -> dict:
+def make_payload(release: dict, source_repo: str, test: bool = False, forum: bool = False,
+                 thread_mode: str = "webhook", report_channel_id: str = DEFAULT_REPORT_CHANNEL_ID) -> dict:
     tag = clean_mentions(str(release["tag_name"]))
     release_url = str(release["html_url"])
     preview = bool(release.get("prerelease"))
@@ -101,6 +103,16 @@ def make_payload(release: dict, source_repo: str, test: bool = False, forum: boo
     title = f"{icon} openOMSI {tag}  •  {category}"
     if test:
         title = "🧪 TEST • " + title
+
+    if thread_mode not in THREAD_MODES:
+        raise ValueError("DISCORD_THREAD_MODE must be webhook, text or forum.")
+    if thread_mode == "webhook" and not forum:
+        if not re.fullmatch(r"\d{15,25}", report_channel_id):
+            raise ValueError("DISCORD_REPORT_CHANNEL_ID must be a numeric Discord channel ID.")
+        bug_help = (f"Report issues through [GitHub Issues](https://github.com/{source_repo}/issues/new/choose) "
+                    f"or in <#{report_channel_id}>. Include your platform, reproduction steps and logs.")
+    else:
+        bug_help = "Open the **Bug Reports** thread attached to this release and share your report."
 
     embed = {
         "author": {
@@ -116,7 +128,7 @@ def make_payload(release: dict, source_repo: str, test: bool = False, forum: boo
             {"name": "📦 VERSION", "value": f"`{tag[:100]}`", "inline": True},
             {"name": "🏷️ RELEASE TRACK", "value": "Preview / Beta" if preview else "Stable", "inline": True},
             {"name": "📥 DOWNLOAD", "value": f"[**Get this release →**]({release_url})", "inline": False},
-            {"name": "🐛 FOUND A BUG?", "value": "Open the **Bug Reports** thread attached to this release and share your report.", "inline": False},
+            {"name": "🐛 FOUND A BUG?", "value": bug_help, "inline": False},
         ],
         "thumbnail": {"url": "https://github.com/openOMSI-org.png"},
         "footer": {"text": f"Official release notes • {source_repo} • Automated announcements"[:2048]},
