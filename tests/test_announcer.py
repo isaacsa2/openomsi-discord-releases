@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 MODULE = Path(__file__).resolve().parents[1] / "scripts" / "announce_release.py"
+sys.path.insert(0, str(MODULE.parent))
 spec = importlib.util.spec_from_file_location("announcer", MODULE)
 announcer = importlib.util.module_from_spec(spec)
 sys.modules["announcer"] = announcer
@@ -46,13 +47,15 @@ class AnnouncerTests(unittest.TestCase):
         p = announcer.make_payload(release(48, "2026-10-29T00:00:00Z", body="A" * 10000), "openOMSI-org/openOMSI")
         self.assertLessEqual(len(p["embeds"][0]["description"]), 4096)
         self.assertEqual(p["allowed_mentions"], {"parse": []})
-        self.assertIn("full changelog", p["embeds"][0]["description"])
+        self.assertIn("Full release notes", p["embeds"][0]["description"])
 
     def test_webhook_validation(self):
-        url = "https://discord.com/api/webhooks/123/abc?thread_id=777"
-        formatted = announcer.webhook_url_with_wait(url)
+        url = "https://discord.com/api/webhooks/123/abc"
+        formatted = announcer.webhook_url_with_wait(url, "123456789012345678")
         self.assertIn("wait=true", formatted)
-        self.assertIn("thread_id=777", formatted)
+        self.assertIn("thread_id=123456789012345678", formatted)
+        with self.assertRaises(ValueError):
+            announcer.webhook_url_with_wait(url + "?thread_id=123456789012345678")
         for bad in ["http://discord.com/api/webhooks/12/abc", "https://evil.org/api/webhooks/12/abc"]:
             with self.assertRaises(ValueError):
                 announcer.webhook_url_with_wait(bad)
