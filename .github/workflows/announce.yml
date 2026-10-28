@@ -46,7 +46,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_THREAD_MODE: text # Change to forum for Discord Forum channels (no bot token required).
+          DISCORD_THREAD_MODE: webhook # Webhook only, no bot or thread. Optional later: text / forum.
+          DISCORD_REPORT_CHANNEL_ID: "1554233571764346940"
           SOURCE_REPOSITORY: openOMSI-org/openOMSI
           ANNOUNCE_PRERELEASES: "true"
           WORKFLOW_MODE: ${{ inputs.mode || 'check' }}
