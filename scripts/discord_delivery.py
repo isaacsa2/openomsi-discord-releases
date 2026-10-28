@@ -165,12 +165,14 @@ def download_links(release: dict) -> list[dict]:
         entries = list(dict.fromkeys(by_platform.get(platform, [])))
         if not entries:
             continue
-        # Avoid Discord's per-field 1024 character and total 6000 character limits.
-        value = " • ".join(entries[:4])
-        if len(value) > 980:
-            value = " • ".join(entries[:2])
-        if len(value) <= 1024:
-            fields.append({"name": platform, "value": value, "inline": False})
+        # Keep the entire embed safely below 6000 chars even with five platforms.
+        chosen = []
+        for entry in entries[:4]:
+            next_value = " • ".join(chosen + [entry])
+            if len(next_value) <= 400:
+                chosen.append(entry)
+        if chosen:
+            fields.append({"name": platform, "value": " • ".join(chosen), "inline": False})
     return fields
 
 

@@ -69,6 +69,21 @@ class UpgradeTests(unittest.TestCase):
         total = sum(len(x.get("name", "")) + len(x.get("value", "")) for x in embed["fields"])
         self.assertLessEqual(total + len(embed["description"]) + len(embed["title"]), 6000)
 
+    def test_many_long_download_urls_stay_within_embed_total_limit(self):
+        r = release(body="### Improvements\n" + "\n".join(f"- Improved item {n} " + "x" * 250 for n in range(20)))
+        for category in ("windows", "macos", "linux", "android", "server"):
+            for idx in range(5):
+                r["assets"].append({"id": len(r["assets"]) + 1,
+                                    "name": f"openOMSI-{category}-x64-{idx}.zip",
+                                    "size": 400,
+                                    "browser_download_url": "https://github.com/openOMSI-org/openOMSI/releases/download/v0.3.200/" + "x" * 230 + f"-{category}-{idx}.zip"})
+        embed = delivery.make_payload(r, "openOMSI-org/openOMSI")["embeds"][0]
+        size = (len(embed["title"]) + len(embed["description"]) +
+                sum(len(f["name"]) + len(f["value"]) for f in embed["fields"]) +
+                len(embed["footer"]["text"]) + len(embed["author"]["name"]))
+        self.assertLessEqual(size, 6000)
+        self.assertTrue(all(len(f["value"]) <= 1024 for f in embed["fields"]))
+
     def test_fingerprint_ignores_non_message_changes(self):
         r = release()
         fp = a.release_fingerprint(r, "v0.3.199")
