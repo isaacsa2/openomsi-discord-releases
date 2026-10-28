@@ -15,19 +15,6 @@ A small, **webhook-only** release announcer for the official [openOMSI](https://
 
 > It does not publish game builds, translate source notes, automatically create GitHub bug issues, or post in a Discord channel different from the one associated with your webhook. Discord channel ID `1554233571764346940` is only a **link to the report channel**.
 
-## Setup
-
-1. Create a Discord webhook **in the channel where announcements should appear**. Copy its full HTTPS URL without adding `/github`.
-2. Open [this repository's Actions Secrets](https://github.com/isaacsa2/openomsi-discord-releases/settings/secrets/actions), create `DISCORD_WEBHOOK_URL`, and paste the URL. **Never share it in chat, commits, issues or logs.**
-3. In **Settings → Actions → General**, ensure Actions is enabled and the workflow token may write repository contents and issues. Organization/repository policy may override requested permissions.
-4. Open **Actions → Announce openOMSI releases on Discord → Run workflow**:
-   - `preview_latest`: prints JSON preview only; no Discord action or state change.
-   - `healthcheck`: verifies GitHub releases and the webhook credential **without posting**.
-   - `test_webhook`: posts a clearly marked test announcement; **does not** alter tracked state.
-   - `check`: checks new releases and updates existing announcements.
-
-The tracked baseline starts at **v0.3.45** (October 27, 2026). Versions already in `announced_release_ids` will **not** be announced retroactively, and legacy entries without message IDs cannot be edited.
-
 ## Configuration
 
 In [`.github/workflows/announce.yml`](.github/workflows/announce.yml):
