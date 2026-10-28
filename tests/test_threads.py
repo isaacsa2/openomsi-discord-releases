@@ -49,6 +49,38 @@ class ThreadTests(unittest.TestCase):
         self.assertNotIn("@everyone", desc)
         self.assertNotIn("<@123456789012345678>", desc)
 
+    def test_webhook_only_payload_points_to_git_and_discord(self):
+        payload = make_payload(release(), "openOMSI-org/openOMSI")
+        value = payload["embeds"][0]["fields"][-1]["value"]
+        self.assertIn("https://github.com/openOMSI-org/openOMSI/issues/new/choose", value)
+        self.assertIn("<#1554233571764346940>", value)
+        self.assertNotIn("thread attached", value)
+        self.assertNotIn("thread_name", payload)
+
+    def test_webhook_only_does_not_create_thread(self):
+        state = {"announced_release_ids": [], "pending_threads": {}}
+        with patch.object(a, "send_discord", return_value={}) as sent, \
+             patch.object(a, "start_report_thread") as thread, \
+             patch.object(a, "write_and_push_state") as write:
+            result = a.deliver_release(release(), "openOMSI-org/openOMSI", "unused", "webhook", "", state)
+        self.assertIsNone(result)
+        self.assertEqual(sent.call_count, 1)
+        thread.assert_not_called()
+        write.assert_called_once()
+        self.assertEqual(state["announced_release_ids"], [52])
+        self.assertFalse(state["pending_threads"])
+
+    def test_webhook_only_finalizes_pending_thread_without_reposting(self):
+        state = {"announced_release_ids": [], "pending_threads": {"52": {"message_id": "123456789012345678"}}}
+        with patch.object(a, "send_discord") as sent, \
+             patch.object(a, "start_report_thread") as thread, \
+             patch.object(a, "write_and_push_state"):
+            a.deliver_release(release(), "openOMSI-org/openOMSI", "unused", "webhook", "", state)
+        sent.assert_not_called()
+        thread.assert_not_called()
+        self.assertEqual(state["announced_release_ids"], [52])
+        self.assertFalse(state["pending_threads"])
+
     def test_text_channel_creates_one_thread_and_report(self):
         r = release()
         with patch.object(a, "send_discord", side_effect=[
