@@ -82,6 +82,7 @@ def eligible_releases(releases: list[dict], state: dict, include_prereleases: bo
 
 from discord_delivery import (
     THREAD_MODES,
+    DEFAULT_REPORT_CHANNEL_ID,
     format_changelog,
     webhook_url_with_wait,
     make_payload,
@@ -93,15 +94,30 @@ from discord_delivery import (
 
 
 def deliver_release(release: dict, source: str, webhook: str, thread_mode: str,
-                    bot_token: str, state: dict | None = None, test: bool = False):
+                    bot_token: str, state: dict | None = None, test: bool = False,
+                    report_channel_id: str = DEFAULT_REPORT_CHANNEL_ID):
     """Checkpoint each step so a thread failure doesn't repost the announcement."""
     key = str(release["id"])
     pending = state.setdefault("pending_threads", {}) if state is not None else {}
     progress = pending.get(key)
 
+    if thread_mode == "webhook":
+        # One webhook message; no bot, no thread or second report template.
+        # A pending thread checkpoint from a previous configuration already has a post.
+        if progress is None:
+            send_discord(make_payload(release, source, test=test, thread_mode="webhook",
+                                      report_channel_id=report_channel_id), webhook)
+        if state is not None:
+            if int(release["id"]) not in state["announced_release_ids"]:
+                state["announced_release_ids"].append(int(release["id"]))
+            pending.pop(key, None)
+            write_and_push_state(state, release)
+        return None
+
     if progress is None:
         message = send_discord(make_payload(release, source, test=test,
-                                            forum=(thread_mode == "forum")), webhook)
+                                            forum=(thread_mode == "forum"),
+                                            thread_mode=thread_mode), webhook)
         message_id = str(message.get("id", ""))
         channel_id = str(message.get("channel_id", ""))
         if not (message_id.isdigit() and channel_id.isdigit()):
@@ -160,9 +176,10 @@ def main() -> int:
     token = os.getenv("GITHUB_TOKEN", "")
     webhook = os.getenv("DISCORD_WEBHOOK_URL", "")
     bot_token = os.getenv("DISCORD_BOT_TOKEN", "")
-    thread_mode = os.getenv("DISCORD_THREAD_MODE", "text").lower()
+    thread_mode = os.getenv("DISCORD_THREAD_MODE", "webhook").lower()
+    report_channel_id = os.getenv("DISCORD_REPORT_CHANNEL_ID", DEFAULT_REPORT_CHANNEL_ID)
     if thread_mode not in THREAD_MODES:
-        raise ValueError("DISCORD_THREAD_MODE must be text or forum.")
+        raise ValueError("DISCORD_THREAD_MODE must be webhook, text or forum.")
     source = os.getenv("SOURCE_REPOSITORY", "openOMSI-org/openOMSI")
     include_pre = os.getenv("ANNOUNCE_PRERELEASES", "true").lower() == "true"
     releases = fetch_releases(source, token)
@@ -174,15 +191,20 @@ def main() -> int:
             return 0
         latest = max(published, key=lambda r: (parse_date(r["published_at"]), int(r["id"])))
         if mode == "preview_latest":
-            print(json.dumps(make_payload(latest, source, forum=(thread_mode == "forum")),
+            print(json.dumps(make_payload(latest, source, forum=(thread_mode == "forum"),
+                                          thread_mode=thread_mode, report_channel_id=report_channel_id),
                              indent=2, ensure_ascii=False))
             return 0
         if not webhook:
             raise RuntimeError("Set the DISCORD_WEBHOOK_URL Actions secret before sending a test.")
         if thread_mode == "text" and not bot_token:
             raise RuntimeError("Set DISCORD_BOT_TOKEN for text-channel threads, or select forum mode.")
-        thread_id = deliver_release(latest, source, webhook, thread_mode, bot_token, test=True)
-        print(f"Test announcement and bug-report thread created for {latest['tag_name']} (thread {thread_id}; state unchanged).")
+        thread_id = deliver_release(latest, source, webhook, thread_mode, bot_token,
+                                    test=True, report_channel_id=report_channel_id)
+        if thread_mode == "webhook":
+            print(f"Test webhook-only announcement sent for {latest['tag_name']} (no thread; state unchanged).")
+        else:
+            print(f"Test announcement and bug-report thread created for {latest['tag_name']} (thread {thread_id}; state unchanged).")
         return 0
 
     state = read_state()
@@ -195,8 +217,12 @@ def main() -> int:
     if thread_mode == "text" and not bot_token:
         raise RuntimeError("Set DISCORD_BOT_TOKEN for text-channel threads, or select forum mode.")
     for release in pending:
-        thread_id = deliver_release(release, source, webhook, thread_mode, bot_token, state)
-        print(f"Announced {release['tag_name']} with bug-report thread {thread_id}.")
+        thread_id = deliver_release(release, source, webhook, thread_mode, bot_token, state,
+                                    report_channel_id=report_channel_id)
+        if thread_mode == "webhook":
+            print(f"Announced {release['tag_name']} via webhook (no thread).")
+        else:
+            print(f"Announced {release['tag_name']} with bug-report thread {thread_id}.")
     return 0
 
 if __name__ == "__main__":
