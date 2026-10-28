@@ -1,0 +1,52 @@
+name: Announce openOMSI releases on Discord
+
+on:
+  schedule:
+    # UTC. Offset avoids the top-of-hour peak; scheduling is best-effort.
+    - cron: "3-58/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Check for new releases, preview the latest, or send a test"
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - preview_latest
+          - test_webhook
+
+permissions:
+  contents: write # Required to record announced releases on main.
+
+concurrency:
+  group: discord-release-announcer
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test announcer
+        run: python -m unittest discover -s tests -v
+
+      - name: Check and announce
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SOURCE_REPOSITORY: openOMSI-org/openOMSI
+          ANNOUNCE_PRERELEASES: "true"
+          WORKFLOW_MODE: ${{ inputs.mode || 'check' }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: python scripts/announce_release.py
