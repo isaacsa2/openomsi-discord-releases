@@ -2,12 +2,12 @@ name: Announce openOMSI releases on Discord
 
 on:
   schedule:
-    # UTC. Offset avoids the top-of-hour peak; scheduling is best-effort.
+    # GitHub cron is UTC and best-effort. Keep away from the top of the hour.
     - cron: "3-58/5 * * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "Check for new releases, preview the latest, or send a test"
+        description: "Check, preview, send TEST, or verify webhook health"
         required: true
         default: check
         type: choice
@@ -15,9 +15,11 @@ on:
           - check
           - preview_latest
           - test_webhook
+          - healthcheck
 
 permissions:
-  contents: write # Required to record announced releases on main.
+  contents: write # Store release IDs, Discord message IDs and fingerprints.
+  issues: write # Open/resolve one diagnostic issue if the Action fails/succeeds.
 
 concurrency:
   group: discord-release-announcer
@@ -38,18 +40,50 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Test announcer
+      - name: Run offline tests
         run: python -m unittest discover -s tests -v
 
-      - name: Check and announce
+      - name: Check, announce, and synchronize
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_THREAD_MODE: webhook # Webhook only, no bot or thread. Optional later: text / forum.
+          DISCORD_THREAD_MODE: webhook # No Discord bot or threads by default.
           DISCORD_REPORT_CHANNEL_ID: "1554233571764346940"
           SOURCE_REPOSITORY: openOMSI-org/openOMSI
           ANNOUNCE_PRERELEASES: "true"
+          EDIT_RELEASE_UPDATES: "true"
           WORKFLOW_MODE: ${{ inputs.mode || 'check' }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: python scripts/announce_release.py
+
+      - name: Create or update diagnostic issue on failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          TITLE="Release announcer needs attention"
+          BODY="The release announcement workflow failed. Check the [latest failing run](${RUN_URL}) and its sanitized logs. No webhook tokens are included in this report."
+          ISSUE=$(gh issue list --state open --limit 100 --json number,title --jq '.[] | select(.title == "Release announcer needs attention") | .number' | head -n 1)
+          if [ -n "$ISSUE" ]; then
+            gh issue edit "$ISSUE" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi
+
+      - name: Resolve diagnostic issue after recovery
+        if: ${{ success() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          ISSUE=$(gh issue list --state open --limit 100 --json number,title --jq '.[] | select(.title == "Release announcer needs attention") | .number' | head -n 1)
+          if [ -n "$ISSUE" ]; then
+            gh issue close "$ISSUE" --reason completed --comment "Workflow passed again; closing the automated health alert."
+          fi
