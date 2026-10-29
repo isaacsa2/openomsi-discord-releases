@@ -1,6 +1,17 @@
 {
   "baseline_published_at": "2026-10-27T00:15:47Z",
   "announced_release_ids": [
-    424903974
-  ]
+    424903974,
+    428333593
+  ],
+  "pending_threads": {},
+  "messages": {
+    "428333593": {
+      "message_id": "1565455793493385260",
+      "channel_id": "1554213681376526426",
+      "webhook_id": "1565084711443763371",
+      "tag": "v0.3.46",
+      "fingerprint": "ae08cc436a60aab195b11ff5963d62b1b025d3e75331e63a9e2a1a33f5db43bf"
+    }
+  }
 }
