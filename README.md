@@ -5,7 +5,7 @@ A small, **webhook-only** release announcer for the official [openOMSI](https://
 ## What it does
 
 - Checks GitHub Releases on a best-effort ~5-minute schedule (stable releases **and** pre-releases; never drafts).
-- Publishes **one** polished Discord embed per new release, using official notes in English, with sections for features, improvements, fixes and known issues where supported by the source text.
+- Publishes **one** phone-friendly Discord embed per new release, with distinct Stable/Beta colors, a short highlight taken directly from the official notes when available, organized changes, compact platform downloads, and Discord-localized publication dates. No translation service, bot or separate page is required.
 - Links **actual published release assets** by platform: Windows, macOS, Linux, Android and dedicated servers. A fallback link opens all downloads.
 - Shows published date, release track (stable/beta), comparisons to the preceding release, and bug report destinations: [GitHub Issues](https://github.com/openOMSI-org/openOMSI/issues/new/choose) or <#1554233571764346940>.
 - Stores release ID, Discord message ID, webhook ID and fingerprint in `state/announced.json`. When official notes or assets change, **edits the existing webhook message** instead of reposting it.
