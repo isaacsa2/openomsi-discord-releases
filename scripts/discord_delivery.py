@@ -29,8 +29,10 @@ def clean_mentions(value: str) -> str:
 
 def canonical_heading(header: str) -> str:
     h = header.strip().lower()
-    if any(word in h for word in ("known issue", "limitation", "regression")):
+    if any(word in h for word in ("known", "limitation", "regression", "follow-up", "caveat")):
         return "⚠️ Known Issues"
+    if any(word in h for word in ("security", "hardening", "project", "check", "infrastructure")):
+        return "🔒 Security & Project"
     if any(word in h for word in ("fix", "bug", "crash", "stabilit")):
         return "🛠️ Bug Fixes"
     if any(word in h for word in ("feature", "new", "added", "addition")):
@@ -52,6 +54,18 @@ def classify_bullet(bullet: str) -> str:
     return "⚡ Improvements"
 
 
+def release_intro(source: str) -> str:
+    """The leading blockquote (e.g. "Beta, for testing...") becomes a short callout."""
+    lead = re.split(r"(?m)^\s{0,3}(?:#{1,6}\s|[-*]\s)", source, maxsplit=1)[0]
+    quoted = [line.strip()[1:].strip() for line in lead.splitlines() if line.strip().startswith(">")]
+    text = clean_mentions(re.sub(r"[\x00-\x1f]", " ", " ".join(quoted))).strip()
+    if not text:
+        return ""
+    if len(text) > 300:
+        text = text[:297].rsplit(" ", 1)[0].rstrip() + "…"
+    return "> " + text + "\n\n"
+
+
 def format_changelog(body: str, release_url: str) -> str:
     """Preserve the author's words, organize them, and fit in Discord's limits."""
     source = (body or "").replace("\r\n", "\n").strip()
@@ -59,6 +73,11 @@ def format_changelog(body: str, release_url: str) -> str:
     link = f"\n\n[Full release notes]({release_url})"
     if not source:
         return "No release notes published yet." + link
+    # PR links cost ~60 chars each; keep the number so more bullets fit.
+    pr_link = r"\[(#\d+)\]\(https://github\.com/[^)\s]+\)"
+    source = re.sub(r"\(" + pr_link + r"\)", r"(\1)", source)
+    source = re.sub(pr_link, r"\1", source)
+    intro = release_intro(source)
 
     categories: dict[str, list[str]] = {}
     heading = ""
@@ -95,10 +114,11 @@ def format_changelog(body: str, release_url: str) -> str:
             bullet = bullet[:332].rsplit(" ", 1)[0].rstrip() + "…"
         categories.setdefault(bucket, []).append("• " + bullet)
 
-    priority = ("✨ New Features", "⚡ Improvements", "🛠️ Bug Fixes", "⚠️ Known Issues", "📋 Other Changes")
+    priority = ("✨ New Features", "⚡ Improvements", "🛠️ Bug Fixes", "🔒 Security & Project",
+                "⚠️ Known Issues", "📋 Other Changes")
     # Fairly sample separate sections: a long feature list must not hide fixes.
     chosen: dict[str, list[str]] = {k: [] for k in priority}
-    budget = CHANGELOG_LIMIT - len(link) - 3
+    budget = CHANGELOG_LIMIT - len(link) - len(intro) - 3
     consumed = 0
     selected = 0
     for index in range(7):
@@ -122,18 +142,23 @@ def format_changelog(body: str, release_url: str) -> str:
         if not added:
             break
     if not selected:
-        return "Read the official release notes for the full list of changes." + link
+        return intro + "Read the official release notes for the full list of changes." + link
     lines = []
     for category in priority:
         if chosen[category]:
             lines.append("**" + category + "**\n" + "\n".join(chosen[category]))
-    return "\n\n".join(lines).strip() + link
+    return intro + "\n\n".join(lines).strip() + link
 
 
-def download_links(release: dict) -> list[dict]:
-    """Only use actual official release assets; never invent platform support."""
+def download_links(release: dict, budget: int = 2200) -> list[dict]:
+    """Only use actual official release assets; never invent platform support.
+
+    ``budget`` caps the characters of all platform fields together so the whole
+    embed stays below Discord's 6000-char limit; the "all downloads" link covers
+    anything left out.
+    """
     assets = release.get("assets") or []
-    by_platform: dict[str, list[str]] = {}
+    by_platform: dict[str, list[tuple[tuple[str, int], str]]] = {}
     for asset in assets:
         name = str(asset.get("name", ""))
         url = str(asset.get("browser_download_url", ""))
@@ -142,8 +167,11 @@ def download_links(release: dict) -> list[dict]:
         low = name.lower()
         if low in ("sha256sums", "checksums.txt") or low.endswith((".sig", ".sha256")):
             continue
+        os_name = ""
         if "server" in low:
             platform = "🖧 Dedicated Server"
+            os_name = ("Windows" if any(x in low for x in ("windows", "win64", "win32")) else
+                       "Linux" if "linux" in low else "macOS" if any(x in low for x in ("macos", "darwin")) else "")
         elif any(x in low for x in ("windows", "win64", "win32")):
             platform = "🪟 Windows"
         elif any(x in low for x in ("android", ".apk")):
@@ -156,24 +184,32 @@ def download_links(release: dict) -> list[dict]:
             continue
         ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else "file"
         arch = "ARM64" if any(x in low for x in ("arm64", "aarch64")) else ("x64" if any(x in low for x in ("x64", "amd64")) else "")
+        if platform == "🍎 macOS" and arch:
+            arch = "Apple Silicon" if arch == "ARM64" else "Intel"
         suffix = "Installer" if "setup" in low or ext == ".msi" else ext.lstrip(".").upper()
-        label = " ".join(filter(None, (arch, suffix)))
-        by_platform.setdefault(platform, []).append(f"[{label[:50]}]({url})")
+        label = " ".join(filter(None, (os_name, arch, suffix)))
+        order = (os_name, {"x64": 0, "Intel": 0, "ARM64": 1, "Apple Silicon": 1}.get(arch, 2))
+        by_platform.setdefault(platform, []).append((order, f"[{label[:50]}]({url})"))
 
-    fields = []
-    for platform in ("🪟 Windows", "🐧 Linux", "🍎 macOS", "📱 Android", "🖧 Dedicated Server"):
-        entries = list(dict.fromkeys(by_platform.get(platform, [])))
-        if not entries:
-            continue
-        # Keep the entire embed safely below 6000 chars even with five platforms.
-        chosen = []
-        for entry in entries[:4]:
-            next_value = " • ".join(chosen + [entry])
-            if len(next_value) <= 400:
-                chosen.append(entry)
-        if chosen:
-            fields.append({"name": platform, "value": " • ".join(chosen), "inline": False})
-    return fields
+    platforms = [p for p in ("🪟 Windows", "🐧 Linux", "🍎 macOS", "📱 Android", "🖧 Dedicated Server")
+                 if p in by_platform]
+    queues = {p: list(dict.fromkeys(e for _, e in sorted(by_platform[p], key=lambda x: x[0])))[:6]
+              for p in platforms}
+    chosen: dict[str, list[str]] = {p: [] for p in platforms}
+    used = 0
+    # Round-robin: every platform gets its first link before any gets a second.
+    for _ in range(6):
+        for platform in platforms:
+            queue = queues[platform]
+            if len(chosen[platform]) >= len(queue):
+                continue
+            entry = queue[len(chosen[platform])]
+            cost = len(entry) + (len(platform) if not chosen[platform] else len(" • "))
+            if used + cost > budget or len(" • ".join(chosen[platform] + [entry])) > 1024:
+                continue
+            chosen[platform].append(entry)
+            used += cost
+    return [{"name": p, "value": " • ".join(chosen[p]), "inline": True} for p in platforms if chosen[p]]
 
 
 def report_thread_name(tag: str, test: bool = False) -> str:
@@ -197,6 +233,15 @@ def report_template(tag: str, release_url: str, test: bool = False) -> dict:
         f"**Official release:** {release_url}\n"
         "For formal tracking, open a GitHub issue: "
         "https://github.com/openOMSI-org/openOMSI/issues/new/choose")}
+
+
+def discord_date(published_at: str) -> str:
+    """Discord renders <t:...> in each reader's own timezone and language."""
+    try:
+        unix = int(datetime.fromisoformat(published_at.replace("Z", "+00:00")).timestamp())
+    except ValueError:
+        return published_at[:10]
+    return f"<t:{unix}:D>\n<t:{unix}:R>"
 
 
 def make_payload(release: dict, source_repo: str, test: bool = False, forum: bool = False,
@@ -223,25 +268,29 @@ def make_payload(release: dict, source_repo: str, test: bool = False, forum: boo
     fields = [
         {"name": "📦 VERSION", "value": f"`{tag[:100]}`", "inline": True},
         {"name": "🏷️ RELEASE TRACK", "value": "Preview / Beta" if preview else "Stable", "inline": True},
-        {"name": "📅 RELEASED (UTC)", "value": str(release["published_at"])[:10], "inline": True},
+        {"name": "📅 RELEASED", "value": discord_date(str(release["published_at"])), "inline": True},
     ]
-    fields.extend(download_links(release))
-    fields.append({"name": "📥 ALL DOWNLOADS", "value": f"[**View release assets →**]({release_url})", "inline": False})
+    tail = [{"name": "📥 ALL DOWNLOADS", "value": f"[**View release assets →**]({release_url})", "inline": False}]
     if previous_tag and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", previous_tag) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", str(release["tag_name"])):
         compare_url = f"https://github.com/{source_repo}/compare/{quote(previous_tag)}...{quote(str(release['tag_name']))}"
-        fields.append({"name": "🔍 COMPARE", "value": f"[**Changes since {previous_tag}**]({compare_url})", "inline": False})
-    fields.append({"name": "🐛 FOUND A BUG?", "value": bug_help, "inline": False})
+        tail.append({"name": "🔍 COMPARE", "value": f"[**Changes since {previous_tag}**]({compare_url})", "inline": False})
+    tail.append({"name": "🐛 FOUND A BUG?", "value": bug_help, "inline": False})
     embed = {
-        "author": {"name": "openOMSI  /  RELEASE CENTER", "url": f"https://github.com/{source_repo}",
+        "author": {"name": "openOMSI • Release Center", "url": f"https://github.com/{source_repo}",
                    "icon_url": "https://github.com/openOMSI-org.png"},
         "title": title[:256], "url": release_url,
         "description": "### ✨ WHAT'S NEW\n" + format_changelog(str(release.get("body") or ""), release_url),
         "color": 0xDC2626 if critical else (0xF59E0B if preview else 0x2986F6),
-        "fields": fields,
+        "fields": [],
         "thumbnail": {"url": "https://github.com/openOMSI-org.png"},
-        "footer": {"text": f"OFFICIAL RELEASE • AUTOMATED ANNOUNCEMENT • {source_repo}"[:2048]},
+        "footer": {"text": f"Official release • {source_repo}"[:2048],
+                   "icon_url": "https://github.com/openOMSI-org.png"},
         "timestamp": str(release["published_at"]),
     }
+    # Download links get whatever is left of Discord's 6000-char embed limit (with margin).
+    used = (len(embed["title"]) + len(embed["description"]) + len(embed["author"]["name"]) +
+            len(embed["footer"]["text"]) + sum(len(f["name"]) + len(f["value"]) for f in fields + tail))
+    embed["fields"] = fields + download_links(release, budget=max(0, 5800 - used)) + tail
     payload = {"username": "openOMSI Releases", "allowed_mentions": {"parse": []}, "embeds": [embed]}
     if forum:
         payload["thread_name"] = report_thread_name(tag, test=test)
