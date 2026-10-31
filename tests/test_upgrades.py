@@ -192,5 +192,46 @@ class UpgradeTests(unittest.TestCase):
             self.assertNotIn("secretisnotprinted", str(ctx.exception))
 
 
+    def test_embeds_distinguish_stable_and_beta_without_a_bot(self):
+        stable = delivery.make_payload(release(), "openOMSI-org/openOMSI")
+        beta = delivery.make_payload(release(prerelease=True), "openOMSI-org/openOMSI")
+        self.assertNotIn("thread_name", stable)
+        self.assertEqual(stable["allowed_mentions"], {"parse": []})
+        self.assertIn("STABLE RELEASE", stable["embeds"][0]["title"])
+        self.assertIn("BETA / PRE-RELEASE", beta["embeds"][0]["title"])
+        self.assertIn("BETA BUILD", beta["embeds"][0]["description"])
+        self.assertNotEqual(stable["embeds"][0]["color"], beta["embeds"][0]["color"])
+        self.assertEqual(stable["embeds"][0]["fields"][2]["name"], "📅 RELEASED")
+        self.assertIn("<t:", stable["embeds"][0]["fields"][2]["value"])
+        self.assertIn("🟢 Stable", stable["embeds"][0]["fields"][1]["value"])
+
+    def test_summary_highlight_uses_only_official_notes_and_escapes_mentions(self):
+        summary = "### In short\n\n" + ("A useful improvement for every driver. " * 15) + "@everyone\n\n### Fixes\n- Fixed a crash"
+        highlight = delivery.release_highlight(summary)
+        self.assertLessEqual(len(highlight), 320)
+        self.assertNotIn("@everyone", highlight)
+        self.assertIn("A useful improvement", highlight)
+        self.assertEqual(delivery.release_highlight("### Fixes\n- Fixed a crash"), "")
+        payload = delivery.make_payload(release(body=summary), "openOMSI-org/openOMSI")
+        self.assertIn("IN SHORT", payload["embeds"][0]["description"])
+        self.assertIn("WHAT'S NEW", payload["embeds"][0]["description"])
+        self.assertNotIn("@everyone", payload["embeds"][0]["description"])
+
+    def test_downloads_are_multiline_inline_and_use_only_real_assets(self):
+        r = release()
+        r["assets"].append({
+            "name": "openOMSI-windows-x64.zip",
+            "browser_download_url": "https://github.com/openOMSI-org/openOMSI/releases/download/v0.3.200/windows.zip",
+        })
+        payload = delivery.make_payload(r, "openOMSI-org/openOMSI")
+        windows = next(field for field in payload["embeds"][0]["fields"] if field["name"] == "🪟 Windows")
+        self.assertTrue(windows["inline"])
+        self.assertIn("\n• ", windows["value"])
+        self.assertIn("win.exe", windows["value"])
+        self.assertIn("windows.zip", windows["value"])
+        self.assertTrue(all(len(f["value"]) <= 1024 for f in payload["embeds"][0]["fields"]))
+
+
+
 if __name__ == "__main__":
     unittest.main()
