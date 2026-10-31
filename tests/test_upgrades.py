@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -83,6 +84,37 @@ class UpgradeTests(unittest.TestCase):
                 len(embed["footer"]["text"]) + len(embed["author"]["name"]))
         self.assertLessEqual(size, 6000)
         self.assertTrue(all(len(f["value"]) <= 1024 for f in embed["fields"]))
+
+    def test_server_downloads_are_distinguishable_and_complete(self):
+        r = release()
+        base = "https://github.com/openOMSI-org/openOMSI/releases/download/v0.3.200/"
+        names = ["server-windows-arm64.zip", "server-linux-x64.zip", "server-windows-x64.zip",
+                 "server-linux-arm64.zip", "macos-arm64.zip", "macos-x64.zip"]
+        r["assets"] += [{"id": 10 + i, "name": f"openOMSI-0.3.200-{n}", "size": 1,
+                         "browser_download_url": base + f"openOMSI-0.3.200-{n}"} for i, n in enumerate(names)]
+        values = {f["name"]: f["value"] for f in delivery.make_payload(r, "openOMSI-org/openOMSI")["embeds"][0]["fields"]}
+        labels = re.findall(r"\[([^\]]+)\]", values["🖧 Dedicated Server"])
+        self.assertEqual(labels, ["Linux x64 ZIP", "Linux ARM64 ZIP", "Windows x64 ZIP", "Windows ARM64 ZIP"])
+        self.assertEqual(re.findall(r"\[([^\]]+)\]", values["🍎 macOS"]), ["Intel ZIP", "Apple Silicon ZIP"])
+
+    def test_intro_known_followups_and_compact_pr_links(self):
+        body = ("**openOMSI 0.2.60**\n\n> **Beta, for testing.** Report what breaks.\n\n"
+                "### New\n- Update channel ([#2571](https://github.com/openOMSI-org/openOMSI/pull/2571)).\n"
+                "- Fixed in (see [#9](https://github.com/openOMSI-org/openOMSI/pull/9))\n"
+                "### Project and security checks\n- CodeQL analyses workflows\n"
+                "### Known follow-ups\n- Switching channels can race\n")
+        text = delivery.format_changelog(body, "https://github.com/openOMSI-org/openOMSI/releases/tag/v1")
+        self.assertTrue(text.startswith("> **Beta, for testing.** Report what breaks."))
+        self.assertIn("Update channel (#2571).", text)
+        self.assertIn("Fixed in (see #9)", text)
+        self.assertNotIn("/pull/", text)
+        self.assertIn("**🔒 Security & Project**\n• CodeQL", text)
+        self.assertIn("**⚠️ Known Issues**\n• Switching channels can race", text)
+        self.assertNotIn("Other Changes", text)
+
+    def test_release_date_uses_discord_timestamps(self):
+        values = {f["name"]: f["value"] for f in delivery.make_payload(release(), "openOMSI-org/openOMSI")["embeds"][0]["fields"]}
+        self.assertEqual(values["📅 RELEASED"], "<t:1793275200:D>\n<t:1793275200:R>")
 
     def test_fingerprint_ignores_non_message_changes(self):
         r = release()
