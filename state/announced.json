@@ -2,7 +2,8 @@
   "baseline_published_at": "2026-10-27T00:15:47Z",
   "announced_release_ids": [
     424903974,
-    428333593
+    428333593,
+    430976767
   ],
   "pending_threads": {},
   "messages": {
@@ -12,6 +13,13 @@
       "webhook_id": "1565084711443763371",
       "tag": "v0.3.46",
       "fingerprint": "ae08cc436a60aab195b11ff5963d62b1b025d3e75331e63a9e2a1a33f5db43bf"
+    },
+    "430976767": {
+      "message_id": "1566645261894156389",
+      "channel_id": "1557718502109089863",
+      "webhook_id": "1565084711443763371",
+      "tag": "v0.3.47",
+      "fingerprint": "0f98b0b0b03452b1995a586e30df71ac0a5444ae3a93240b54a3a963862d196a"
     }
   }
 }
