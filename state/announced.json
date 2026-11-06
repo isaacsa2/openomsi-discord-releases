@@ -6,7 +6,8 @@
     430976767,
     432850976,
     434677159,
-    435963155
+    435963155,
+    437069677
   ],
   "pending_threads": {},
   "messages": {
@@ -44,6 +45,13 @@
       "webhook_id": "1565084711443763371",
       "tag": "v0.3.50",
       "fingerprint": "fac6a8708bf0647cbe99264285f12780b1fbd4cc67712a8bd7d8e816c0bdaadd"
+    },
+    "437069677": {
+      "message_id": "1568389590627131527",
+      "channel_id": "1557718502109089863",
+      "webhook_id": "1565084711443763371",
+      "tag": "avatars-2",
+      "fingerprint": "c901e1d61bedd7e02bbc3ee81c6a942e10e5f23f0edab8987db1fe6d12a8c0df"
     }
   }
 }
