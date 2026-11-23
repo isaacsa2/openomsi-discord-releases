@@ -204,12 +204,33 @@ def download_links(release: dict, budget: int = 2200) -> list[dict]:
             if len(chosen[platform]) >= len(queue):
                 continue
             entry = queue[len(chosen[platform])]
-            cost = len(entry) + (len(platform) if not chosen[platform] else len(" • "))
-            if used + cost > budget or len(" • ".join(chosen[platform] + [entry])) > 1024:
+            cost = len(entry) + (len(platform) + 2 if not chosen[platform] else 3)
+            if used + cost > budget or len("\n".join("• " + link for link in chosen[platform] + [entry])) > 1024:
                 continue
             chosen[platform].append(entry)
             used += cost
-    return [{"name": p, "value": " • ".join(chosen[p]), "inline": True} for p in platforms if chosen[p]]
+    return [{"name": p, "value": "\n".join("• " + link for link in chosen[p]), "inline": True}
+            for p in platforms if chosen[p]]
+
+
+def release_highlight(body: str, limit: int = 320) -> str:
+    """Reuse an official 'In short' paragraph without inventing a summary."""
+    source = (body or "").replace("\r\n", "\n")
+    match = re.search(r"(?im)^\s{0,3}#{2,4}\s+(?:in short|summary|overview)\b[^\n]*\n", source)
+    if not match:
+        return ""
+    lines = []
+    for raw in source[match.end():].splitlines():
+        line = raw.strip()
+        if not line and not lines:
+            continue
+        if not line or line.startswith(("#", "-", "*", "|", ">")):
+            break
+        lines.append(line)
+    summary = clean_mentions(re.sub(r"[\x00-\x1f]", " ", " ".join(lines))).strip()
+    if len(summary) > limit:
+        summary = summary[:limit - 1].rsplit(" ", 1)[0].rstrip() + "…"
+    return summary
 
 
 def report_thread_name(tag: str, test: bool = False) -> str:
@@ -253,7 +274,7 @@ def make_payload(release: dict, source_repo: str, test: bool = False, forum: boo
     release_url = str(release["html_url"])
     preview = bool(release.get("prerelease"))
     category = "BETA / PRE-RELEASE" if preview else "STABLE RELEASE"
-    icon = "🧪" if preview else "🚀"
+    icon = "🧪" if preview else "🟢"
     critical = bool(re.search(r"(?i)\b(critical security|critical issue|security advisory|breaking change)\b", str(release.get("body") or "")))
     title = f"{icon} openOMSI {tag}  •  {category}"
     if test:
@@ -261,29 +282,37 @@ def make_payload(release: dict, source_repo: str, test: bool = False, forum: boo
     if thread_mode == "webhook" and not forum:
         if not SNOWFLAKE_RE.fullmatch(report_channel_id):
             raise ValueError("DISCORD_REPORT_CHANNEL_ID must be a numeric Discord channel ID.")
-        bug_help = (f"Report issues via [GitHub Issues](https://github.com/{source_repo}/issues/new/choose) "
-                    f"or in <#{report_channel_id}>. Include platform, reproduction steps and logs.")
+        bug_help = (f"[Report on GitHub](https://github.com/{source_repo}/issues/new/choose)"
+                    f"  •  <#{report_channel_id}>\n"
+                    "Include your platform, steps to reproduce and logs.")
     else:
         bug_help = "Open the **Bug Reports** thread attached to this release."
     fields = [
         {"name": "📦 VERSION", "value": f"`{tag[:100]}`", "inline": True},
-        {"name": "🏷️ RELEASE TRACK", "value": "Preview / Beta" if preview else "Stable", "inline": True},
+        {"name": "🏷️ RELEASE TRACK", "value": "🧪 Beta / preview" if preview else "🟢 Stable", "inline": True},
         {"name": "📅 RELEASED", "value": discord_date(str(release["published_at"])), "inline": True},
     ]
-    tail = [{"name": "📥 ALL DOWNLOADS", "value": f"[**View release assets →**]({release_url})", "inline": False}]
+    tail = [{"name": "📥 ALL DOWNLOADS", "value": f"[Browse official release files]({release_url})", "inline": False}]
     if previous_tag and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", previous_tag) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", str(release["tag_name"])):
         compare_url = f"https://github.com/{source_repo}/compare/{quote(previous_tag)}...{quote(str(release['tag_name']))}"
-        tail.append({"name": "🔍 COMPARE", "value": f"[**Changes since {previous_tag}**]({compare_url})", "inline": False})
+        tail.append({"name": "🔍 COMPARE", "value": f"[Changes since {previous_tag}]({compare_url})", "inline": False})
     tail.append({"name": "🐛 FOUND A BUG?", "value": bug_help, "inline": False})
+    status = ("**🧪 BETA BUILD**  ·  A preview for testing; bugs and regressions are possible."
+              if preview else "**🟢 STABLE RELEASE**  ·  Available through the official GitHub release.")
+    if test:
+        status = "**TEST ANNOUNCEMENT — NOT A REAL RELEASE**\n" + status
+    highlight = release_highlight(str(release.get("body") or ""))
+    intro = status + (f"\n\n**📰 IN SHORT**\n{highlight}" if highlight else "")
+    description = intro + "\n\n**✨ WHAT'S NEW**\n" + format_changelog(str(release.get("body") or ""), release_url)
     embed = {
-        "author": {"name": "openOMSI • Release Center", "url": f"https://github.com/{source_repo}",
+        "author": {"name": "openOMSI • Release Notes", "url": f"https://github.com/{source_repo}",
                    "icon_url": "https://github.com/openOMSI-org.png"},
         "title": title[:256], "url": release_url,
-        "description": "### ✨ WHAT'S NEW\n" + format_changelog(str(release.get("body") or ""), release_url),
-        "color": 0xDC2626 if critical else (0xF59E0B if preview else 0x2986F6),
+        "description": description[:4096],
+        "color": 0xD73A49 if critical else (0xE8A317 if preview else 0x238636),
         "fields": [],
         "thumbnail": {"url": "https://github.com/openOMSI-org.png"},
-        "footer": {"text": f"Official release • {source_repo}"[:2048],
+        "footer": {"text": "openOMSI • GitHub Releases • Automated update",
                    "icon_url": "https://github.com/openOMSI-org.png"},
         "timestamp": str(release["published_at"]),
     }
