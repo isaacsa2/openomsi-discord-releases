@@ -162,16 +162,56 @@ class UpgradeTests(unittest.TestCase):
                                                       delivery.DEFAULT_REPORT_CHANNEL_ID), [])
         self.assertEqual(state["messages"]["200"]["fingerprint"], a.release_fingerprint(r))
 
-    def test_deleted_message_fails_without_reposting(self):
+    def test_deleted_message_is_quarantined_without_reposting(self):
         r = release()
         state = {"messages": {"200": {"message_id": MESSAGE_ID,
                                          "webhook_id": "123456789012345678", "fingerprint": "old"}}}
-        with patch.object(a, "edit_discord", side_effect=RuntimeError("Discord request failed (HTTP 404).")), \
-             patch.object(a, "send_discord") as newpost:
-            with self.assertRaisesRegex(RuntimeError, "HTTP 404"):
-                a.sync_updated_releases([r], state, "openOMSI-org/openOMSI", WEBHOOK,
-                                        delivery.DEFAULT_REPORT_CHANNEL_ID)
+        with patch.object(a, "edit_discord", side_effect=RuntimeError("Discord request failed (HTTP 404).")) as edit, \
+             patch.object(a, "send_discord") as newpost, \
+             patch.object(a, "write_and_push_state") as save:
+            self.assertEqual(a.sync_updated_releases([r], state, "openOMSI-org/openOMSI", WEBHOOK,
+                                                     delivery.DEFAULT_REPORT_CHANNEL_ID), [])
+            self.assertEqual(state["messages"]["200"]["edit_unavailable"], "http_404")
+            self.assertEqual(state["messages"]["200"]["message_id"], MESSAGE_ID)
+            self.assertEqual(state["messages"]["200"]["fingerprint"], "old")
+            save.assert_called_once()
+            edit.reset_mock()
+            self.assertEqual(a.sync_updated_releases([r], state, "openOMSI-org/openOMSI", WEBHOOK,
+                                                     delivery.DEFAULT_REPORT_CHANNEL_ID), [])
+            edit.assert_not_called()
             newpost.assert_not_called()
+
+    def test_missing_announcement_does_not_block_other_edits(self):
+        older, newer = release(id=199), release(id=200)
+        state = {"messages": {
+            "199": {"message_id": "111111111111111111",
+                    "webhook_id": "123456789012345678", "fingerprint": "old"},
+            "200": {"message_id": MESSAGE_ID,
+                    "webhook_id": "123456789012345678", "fingerprint": "old"},
+        }}
+        with patch.object(a, "edit_discord", side_effect=[
+                RuntimeError("Discord request failed (HTTP 404)."),
+                {"id": "111111111111111111"}]) as edit, \
+             patch.object(a, "send_discord") as newpost, \
+             patch.object(a, "write_and_push_state") as save:
+            updated = a.sync_updated_releases([older, newer], state, "openOMSI-org/openOMSI", WEBHOOK,
+                                              delivery.DEFAULT_REPORT_CHANNEL_ID)
+        self.assertEqual(updated, ["v0.3.199"])
+        self.assertEqual(edit.call_count, 2)
+        self.assertEqual(save.call_count, 2)
+        self.assertEqual(state["messages"]["200"]["edit_unavailable"], "http_404")
+        self.assertNotEqual(state["messages"]["199"]["fingerprint"], "old")
+        newpost.assert_not_called()
+
+    def test_non_404_discord_edit_error_still_fails(self):
+        state = {"messages": {"200": {"message_id": MESSAGE_ID,
+                                         "webhook_id": "123456789012345678", "fingerprint": "old"}}}
+        with patch.object(a, "edit_discord", side_effect=RuntimeError("Discord request failed (HTTP 403).")), \
+             patch.object(a, "write_and_push_state") as save:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 403"):
+                a.sync_updated_releases([release()], state, "openOMSI-org/openOMSI", WEBHOOK,
+                                        delivery.DEFAULT_REPORT_CHANNEL_ID)
+            save.assert_not_called()
 
     def test_changed_webhook_rejected_before_edit(self):
         r = release()

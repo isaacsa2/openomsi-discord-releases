@@ -218,6 +218,10 @@ def sync_updated_releases(releases: list[dict], state: dict, source: str,
     for release in published[:MAX_EDIT_CHECKS]:
         key = str(release["id"])
         stored = known[key]
+        # A 404 means this webhook cannot edit the original Discord message.
+        # Keep its ID and fingerprint for manual recovery; never repost it.
+        if stored.get("edit_unavailable") == "http_404":
+            continue
         new_fingerprint = release_fingerprint(release, previous_tag(release, releases))
         if stored.get("fingerprint") == new_fingerprint:
             continue
@@ -227,8 +231,19 @@ def sync_updated_releases(releases: list[dict], state: dict, source: str,
         payload = make_payload(release, source, thread_mode="webhook",
                                report_channel_id=report_channel_id,
                                previous_tag=previous_tag(release, releases))
-        # Never repost on HTTP 404: deleted messages require manual recovery.
-        edited = edit_discord(payload, webhook, message_id)
+        # Never repost an unavailable message: that could create duplicates.
+        # Quarantine only a confirmed 404; other Discord errors stay fatal.
+        try:
+            edited = edit_discord(payload, webhook, message_id)
+        except RuntimeError as error:
+            if str(error) != "Discord request failed (HTTP 404).":
+                raise
+            stored["edit_unavailable"] = "http_404"
+            write_and_push_state(state, release)
+            summary(f"WARNING: {release['tag_name']}: original Discord message is unavailable "
+                    "(HTTP 404). No repost attempted; inspect the stored message ID "
+                    "and channel, then clear edit_unavailable only after manual recovery.")
+            continue
         if str(edited.get("id", "")) != message_id:
             raise RuntimeError("Discord edit did not confirm the original message ID.")
         stored.update({"fingerprint": new_fingerprint, "tag": str(release["tag_name"])})
@@ -299,6 +314,13 @@ def main() -> int:
     if thread_mode == "webhook" and edit_updates:
         for tag in sync_updated_releases(releases, state, source, webhook, report_channel_id):
             summary(f"Existing announcement updated: {tag}")
+        unavailable = [str(record.get("tag") or key)
+                       for key, record in state.get("messages", {}).items()
+                       if record.get("edit_unavailable") == "http_404"]
+        if unavailable:
+            summary(f"WARNING: {len(unavailable)} prior Discord announcement(s) unavailable "
+                    f"for edits (no repost): {', '.join(unavailable[:10])}"
+                    + (" and others" if len(unavailable) > 10 else ""))
     if not pending:
         summary("No new releases to announce.")
     return 0
