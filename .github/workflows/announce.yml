@@ -84,6 +84,16 @@ jobs:
         shell: bash
         run: |
           ISSUE=$(gh issue list --state open --limit 100 --json number,title --jq '.[] | select(.title == "Release announcer needs attention") | .number' | head -n 1)
-          if [ -n "$ISSUE" ]; then
-            gh issue close "$ISSUE" --reason completed --comment "Workflow passed again; closing the automated health alert."
+          # A missing original Discord post requires manual recovery even when the
+          # remaining release updates succeeded. Keep the alert visible.
+          MISSING=$(python -c "import json; s=json.load(open('state/announced.json')); print(', '.join(v.get('tag', k) for k,v in s.get('messages', {}).items() if v.get('missing')))")
+          if [ -n "$MISSING" ]; then
+            BODY="The workflow runs, but the following existing announcements are inaccessible (HTTP 404): $MISSING. No messages were reposted. Confirm the original Discord posts and update their IDs in state/announced.json only after manual recovery."
+            if [ -n "$ISSUE" ]; then
+              gh issue edit "$ISSUE" --body "$BODY"
+            else
+              gh issue create --title "Release announcer needs attention" --body "$BODY"
+            fi
+          elif [ -n "$ISSUE" ]; then
+            gh issue close "$ISSUE" --reason completed --comment "Workflow passed again and no missing messages remain."
           fi
