@@ -314,6 +314,13 @@ def main() -> int:
     if thread_mode == "webhook" and edit_updates:
         for tag in sync_updated_releases(releases, state, source, webhook, report_channel_id):
             summary(f"Existing announcement updated: {tag}")
+        unavailable = [str(record.get("tag") or key)
+                       for key, record in state.get("messages", {}).items()
+                       if record.get("edit_unavailable") == "http_404"]
+        if unavailable:
+            summary(f"WARNING: {len(unavailable)} prior Discord announcement(s) unavailable "
+                    f"for edits (no repost): {', '.join(unavailable[:10])}"
+                    + (" and others" if len(unavailable) > 10 else ""))
     if not pending:
         summary("No new releases to announce.")
     return 0
