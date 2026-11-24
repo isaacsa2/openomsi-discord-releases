@@ -23,7 +23,8 @@
       "channel_id": "1554213681376526426",
       "webhook_id": "1565084711443763371",
       "tag": "v0.3.46",
-      "fingerprint": "ae08cc436a60aab195b11ff5963d62b1b025d3e75331e63a9e2a1a33f5db43bf"
+      "fingerprint": "ae08cc436a60aab195b11ff5963d62b1b025d3e75331e63a9e2a1a33f5db43bf",
+      "edit_unavailable": "http_404"
     },
     "430976767": {
       "message_id": "1566645261894156389",
